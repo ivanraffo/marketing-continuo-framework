@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Marketing Contínuo — Framework 3D v7</title>
+<title>Marketing Contínuo — Framework 3D v16</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600&display=swap" rel="stylesheet">
 <style>
   :root{
@@ -32,7 +32,31 @@
   .ui button:hover{border-color:var(--magenta);color:#fff;background:rgba(255,30,142,.12)}
   .ui button.active{border-color:var(--magenta);color:var(--magenta)}
   .ui button:focus-visible{outline:2px solid var(--magenta);outline-offset:2px}
-  @media(max-width:640px){.ui{flex-wrap:wrap;justify-content:center;width:92%}.tag{font-size:9px}}
+
+  /* ——— painel de ajustes ——— */
+  #panel{position:fixed;top:24px;right:24px;width:248px;z-index:7;
+    background:rgba(5,32,43,.82);border:1px solid rgba(242,246,248,.14);border-radius:14px;
+    padding:18px 18px 14px;backdrop-filter:blur(10px);
+    transform:translateX(280px);transition:transform .35s cubic-bezier(.4,0,.2,1)}
+  #panel.open{transform:translateX(0)}
+  #panel h2{font-size:10px;letter-spacing:.3em;text-transform:uppercase;font-weight:600;
+    color:var(--muted);margin-bottom:14px}
+  .ctrl{margin-bottom:14px}
+  .ctrl label{display:flex;justify-content:space-between;font-size:9.5px;letter-spacing:.18em;
+    text-transform:uppercase;color:var(--white);margin-bottom:6px;font-weight:400}
+  .ctrl label span{color:var(--magenta);font-weight:600;letter-spacing:.05em}
+  .ctrl input[type=range]{width:100%;-webkit-appearance:none;appearance:none;height:3px;
+    background:rgba(242,246,248,.18);border-radius:2px;outline:none;cursor:pointer}
+  .ctrl input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;
+    width:14px;height:14px;border-radius:50%;background:var(--magenta);border:2px solid var(--bg);cursor:grab}
+  .ctrl input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;
+    background:var(--magenta);border:2px solid var(--bg);cursor:grab}
+  #panelReset{width:100%;margin-top:2px;font-family:'Sora';font-size:9px;letter-spacing:.22em;
+    text-transform:uppercase;color:var(--muted);background:none;border:1px solid rgba(242,246,248,.14);
+    padding:8px;border-radius:8px;cursor:pointer;transition:all .25s}
+  #panelReset:hover{color:var(--white);border-color:rgba(242,246,248,.4)}
+  @media(max-width:640px){.ui{flex-wrap:wrap;justify-content:center;width:92%}.tag{font-size:9px}
+    #panel{top:12px;right:12px;width:220px}}
 </style>
 </head>
 <body>
@@ -42,11 +66,33 @@
 <div class="tag" id="tag2" style="color:var(--purple)">Crescimento em Espiral</div>
 <div class="tag" id="tagCore"><b>Informação</b>compartilhada</div>
 
+<div id="panel">
+  <h2>Ajustes</h2>
+  <div class="ctrl">
+    <label>Giros <span id="vTurns">3.5</span></label>
+    <input type="range" id="sTurns" min="2" max="8" step="0.5" value="3.5">
+  </div>
+  <div class="ctrl">
+    <label>Espessura da cauda <span id="vThick">0.20</span></label>
+    <input type="range" id="sThick" min="0.05" max="0.60" step="0.01" value="0.20">
+  </div>
+  <div class="ctrl">
+    <label>Opacidade da cauda <span id="vOpac">70%</span></label>
+    <input type="range" id="sOpac" min="0.1" max="1" step="0.05" value="0.7">
+  </div>
+  <div class="ctrl">
+    <label>Comprimento da espiral <span id="vLen">100%</span></label>
+    <input type="range" id="sLen" min="0.5" max="1.8" step="0.05" value="1">
+  </div>
+  <button id="panelReset">Restaurar padrão</button>
+</div>
+
 <div class="ui">
   <button id="btnFront">Vista frontal</button>
   <button id="btnSide">Vista lateral</button>
   <button id="btnReplay">Replay</button>
   <button id="btnTags">Rótulos</button>
+  <button id="btnPanel">Ajustes</button>
 </div>
 
 <div id="stage"></div>
@@ -60,10 +106,19 @@ const COLORS = [0x1fd3f3, 0xf2f6f8, 0x9c5bf5];
 const MAGENTA = 0xff1e8e;
 const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-/* ————— cena ————— */
+/* ————— parâmetros controláveis pelos sliders ————— */
+const DEFAULTS = {
+  turns: 3.5,        // voltas em torno do eixo
+  rHead: .20,        // espessura da cauda junto ao elétron
+  tailOpacity: .7,   // opacidade da cauda
+  lengthK: 1.0       // fator de comprimento vertical da espiral
+};
+const P = {...DEFAULTS};
+
+/* ————— cena (flat, sem luzes, sem brilhos) ————— */
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(BG);
-scene.fog = new THREE.Fog(BG, 26, 62);
+scene.fog = new THREE.Fog(BG, 32, 78);
 
 const camera = new THREE.PerspectiveCamera(42, innerWidth/innerHeight, .1, 200);
 const renderer = new THREE.WebGLRenderer({antialias:true});
@@ -71,37 +126,37 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 document.getElementById('stage').appendChild(renderer.domElement);
 
-scene.add(new THREE.AmbientLight(0xffffff, .95));
-const key = new THREE.DirectionalLight(0xffffff, .35);
-key.position.set(6, 12, 8);
-scene.add(key);
-
-/* ————— geometria híbrida: trifólio no presente + espiral cônica no passado ————— */
-const S      = 2.3;
-const SY     = 1.05;
-const TOP_Y  = 5.2;
-const DROP   = 12.0;
-const TAIL_SPAN = Math.PI*2*2.2;
-const SHRINK_MIN = .10;
+/* ————— trajetória: trifólio ascendente —————
+   Projeção XZ = curva do nó trifólio. Y estritamente crescente.
+   t = 0 (base) → 1 (topo)                                          */
+const BASE_Y_BOT = -4.6, BASE_Y_TOP = 5.4;
+const S     = 2.05;
+const GROW0 = .30;
 const bgColor = new THREE.Color(BG);
 
-function pointAt(headU, f, out){
-  const u = headU - f*TAIL_SPAN;
-  const s = SHRINK_MIN + (1-SHRINK_MIN)*Math.pow(1-f, 1.25);
+const yBot = () => BASE_Y_BOT * P.lengthK;
+const yTop = () => BASE_Y_TOP * P.lengthK;
+
+function trefoilAscent(rot, t, out){
+  const u = t * (P.turns/2) * Math.PI * 2;          // turns/2 períodos do trifólio = turns voltas
+  const g = GROW0 + (1-GROW0) * Math.pow(t, 1.1);
+  const x0 = S * (Math.sin(u) + 2*Math.sin(2*u));
+  const z0 = S * (Math.cos(u) - 2*Math.cos(2*u));
+  const c = Math.cos(rot), s = Math.sin(rot);
   out.set(
-    s * S * (Math.sin(u) + 2*Math.sin(2*u)),
-    TOP_Y - f*DROP - s*SY*Math.sin(3*u),
-    s * S * (Math.cos(u) - 2*Math.cos(2*u))
+    g * (x0*c - z0*s),
+    yBot() + t*(yTop() - yBot()),
+    g * (x0*s + z0*c)
   );
   return out;
 }
 
-/* ————— caudas de cometa finas ————— */
-const SEG = 280, RAD = 8;
-const R_HEAD = .26, R_TAIL = .012;
-
 const knotGroup = new THREE.Group();
 scene.add(knotGroup);
+
+/* ————— caudas: trajetória completa, finas, fade até quase desaparecer ————— */
+const SEG = 380, RAD = 10;
+const TAIL_FRAC = 1.0;
 
 const _p=new THREE.Vector3(), _p2=new THREE.Vector3(), _t=new THREE.Vector3(),
       _n=new THREE.Vector3(), _b=new THREE.Vector3(),
@@ -111,7 +166,6 @@ function makeTail(colorHex){
   const count=(SEG+1)*(RAD+1);
   const geo=new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count*3),3).setUsage(THREE.DynamicDrawUsage));
-  geo.setAttribute('normal',   new THREE.BufferAttribute(new Float32Array(count*3),3).setUsage(THREE.DynamicDrawUsage));
   geo.setAttribute('color',    new THREE.BufferAttribute(new Float32Array(count*3),3).setUsage(THREE.DynamicDrawUsage));
   const idx=[];
   for(let i=0;i<SEG;i++)for(let j=0;j<RAD;j++){
@@ -119,164 +173,95 @@ function makeTail(colorHex){
     idx.push(a,b,a+1, b,b+1,a+1);
   }
   geo.setIndex(idx);
-  const mesh=new THREE.Mesh(geo, new THREE.MeshStandardMaterial({vertexColors:true, roughness:.55, metalness:0}));
+  const mesh=new THREE.Mesh(geo, new THREE.MeshBasicMaterial({vertexColors:true, transparent:true, opacity:1}));
   mesh.frustumCulled=false;
   return {mesh, base:new THREE.Color(colorHex)};
 }
 
-function updateTail(tail, headU){
+function updateTail(tail, rot, tHead){
   const pos=tail.mesh.geometry.attributes.position.array;
-  const nor=tail.mesh.geometry.attributes.normal.array;
   const col=tail.mesh.geometry.attributes.color.array;
-  const EPS=.0015;
+  const rTail = Math.max(.012, P.rHead*.09);
+  const EPS=.0012;
   let k=0;
   for(let i=0;i<=SEG;i++){
     const f=i/SEG;
-    pointAt(headU, f, _p);
-    pointAt(headU, Math.min(1, f+EPS), _p2);
-    _t.subVectors(_p, _p2).normalize();
+    const t = Math.max(0, tHead - f*TAIL_FRAC);
+    trefoilAscent(rot, t, _p);
+    trefoilAscent(rot, Math.max(0, t-EPS), _p2);
+    _t.subVectors(_p,_p2);
+    if(_t.lengthSq()<1e-8)_t.set(0,1,0);
+    _t.normalize();
     _n.crossVectors(_t,_up);
     if(_n.lengthSq()<1e-4)_n.set(1,0,0);
     _n.normalize();
     _b.crossVectors(_t,_n).normalize();
 
-    const r = R_TAIL + (R_HEAD-R_TAIL)*Math.pow(1-f, 1.9);
-    _tmpC.copy(tail.base).lerp(bgColor, Math.pow(f,.8)*.97);
+    // fina em quase todo o percurso; engrossa apenas perto do elétron
+    const r = rTail + (P.rHead-rTail)*Math.pow(1-f, 3.6);
+    // quase desaparece na origem
+    _tmpC.copy(tail.base).lerp(bgColor, Math.pow(f,1.5)*.99);
 
     for(let j=0;j<=RAD;j++){
       const a=j/RAD*Math.PI*2, c=Math.cos(a), s=Math.sin(a);
-      const nx=c*_n.x+s*_b.x, ny=c*_n.y+s*_b.y, nz=c*_n.z+s*_b.z;
-      pos[k]=_p.x+r*nx; pos[k+1]=_p.y+r*ny; pos[k+2]=_p.z+r*nz;
-      nor[k]=nx; nor[k+1]=ny; nor[k+2]=nz;
+      pos[k]  =_p.x + r*(c*_n.x+s*_b.x);
+      pos[k+1]=_p.y + r*(c*_n.y+s*_b.y);
+      pos[k+2]=_p.z + r*(c*_n.z+s*_b.z);
       col[k]=_tmpC.r; col[k+1]=_tmpC.g; col[k+2]=_tmpC.b;
       k+=3;
     }
   }
   tail.mesh.geometry.attributes.position.needsUpdate=true;
-  tail.mesh.geometry.attributes.normal.needsUpdate=true;
   tail.mesh.geometry.attributes.color.needsUpdate=true;
 }
 
-/* glow sprites */
-function glowTexture(r,g,b,a=.6){
-  const cv=document.createElement('canvas'); cv.width=cv.height=128;
-  const cx=cv.getContext('2d');
-  const gr=cx.createRadialGradient(64,64,0,64,64,64);
-  gr.addColorStop(0,`rgba(${r},${g},${b},${a})`);
-  gr.addColorStop(.45,`rgba(${r},${g},${b},${a*.25})`);
-  gr.addColorStop(1,'rgba(5,32,43,0)');
-  cx.fillStyle=gr; cx.fillRect(0,0,128,128);
-  return new THREE.CanvasTexture(cv);
-}
-
-/* três cometas defasados 120° */
-const PHASE=Math.PI*2/3;
+/* três pilares ————— */
+const PHASE = Math.PI*2/3;
 const comets=[];
 for(let i=0;i<3;i++){
   const tail=makeTail(COLORS[i]);
   knotGroup.add(tail.mesh);
-
   const head=new THREE.Mesh(
-    new THREE.SphereGeometry(.42,32,32),
-    new THREE.MeshStandardMaterial({color:COLORS[i], emissive:COLORS[i], emissiveIntensity:.45, roughness:.35})
+    new THREE.SphereGeometry(.32, 24, 24),
+    new THREE.MeshBasicMaterial({color:COLORS[i], transparent:true, opacity:1})
   );
   knotGroup.add(head);
-
-  const c=new THREE.Color(COLORS[i]);
-  const glow=new THREE.Sprite(new THREE.SpriteMaterial({
-    map:glowTexture(Math.round(c.r*255),Math.round(c.g*255),Math.round(c.b*255)),
-    transparent:true, depthWrite:false, blending:THREE.AdditiveBlending
-  }));
-  glow.scale.setScalar(2.6);
-  knotGroup.add(glow);
-
-  comets.push({tail, head, glow, phase:i*PHASE, baseGlow:2.6});
+  comets.push({tail, head, rot:i*PHASE});
 }
 
-/* ═════════ CAMPO GERADOR DE ONDAS (substitui a esfera do núcleo) ═════════ */
-const fieldGroup = new THREE.Group();
-fieldGroup.position.y = TOP_Y;
-scene.add(fieldGroup);
-
-// âncora invisível para o rótulo "Informação"
+/* ————— centro: âncora do rótulo ————— */
 const coreAnchor = new THREE.Object3D();
-coreAnchor.position.y = TOP_Y;
+coreAnchor.position.y = .4;
 scene.add(coreAnchor);
 
-// brilho central pulsante (fonte de emissão, sem corpo sólido)
-const emitterGlow = new THREE.Sprite(new THREE.SpriteMaterial({
-  map:glowTexture(195,238,255,.7), transparent:true, depthWrite:false, blending:THREE.AdditiveBlending
-}));
-emitterGlow.scale.setScalar(2.2);
-fieldGroup.add(emitterGlow);
-
-const emitterPoint = new THREE.Sprite(new THREE.SpriteMaterial({
-  map:glowTexture(255,255,255,.95), transparent:true, depthWrite:false, blending:THREE.AdditiveBlending
-}));
-emitterPoint.scale.setScalar(.9);
-fieldGroup.add(emitterPoint);
-
-// ondas concêntricas contidas na área interna, onde estão os 3 pilares (como na referência)
-const WAVE_MAX_R = 3.3;          // alcance restrito ao miolo do trifólio
-const WAVE_CYCLE = 3.4;          // segundos por onda
-const N_WAVES = 7;
-const waves = [];
-const waveMat = () => new THREE.MeshBasicMaterial({
-  color:0x8fc4d6, transparent:true, opacity:0, side:THREE.DoubleSide, depthWrite:false
-});
-for(let i=0;i<N_WAVES;i++){
-  const ringMesh = new THREE.Mesh(new THREE.RingGeometry(.975, 1, 96), waveMat());
-  ringMesh.rotation.x = -Math.PI/2;
-  fieldGroup.add(ringMesh);
-  waves.push({mesh:ringMesh, offset: i/N_WAVES});
-}
-
-// pulsos de energia: partículas que saem do campo e alimentam cada pilar
-const PULSES_PER = 2;
-const pulses = [];
-for(let i=0;i<3;i++){
-  const c=new THREE.Color(COLORS[i]);
-  for(let k=0;k<PULSES_PER;k++){
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
-      map:glowTexture(Math.round(c.r*255),Math.round(c.g*255),Math.round(c.b*255),.9),
-      transparent:true, depthWrite:false, blending:THREE.AdditiveBlending
-    }));
-    sp.scale.setScalar(.7);
-    scene.add(sp);
-    pulses.push({sprite:sp, comet:i, t: (k/PULSES_PER + i*.16) % 1, speed: .55 + Math.random()*.12});
-  }
-}
-const _origin = new THREE.Vector3(0, TOP_Y, 0);
-const _target = new THREE.Vector3();
-const easeIO = x => x<.5 ? 2*x*x : 1-Math.pow(-2*x+2,2)/2;
-/* ═════════════════════════════════════════════════════════════════════ */
-
-/* ————— eixo Y magenta tracejado + seta ————— */
-{
-  const axGeo=new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, TOP_Y-DROP-1.4, 0), new THREE.Vector3(0, TOP_Y+4.4, 0)
+/* ————— eixo Y magenta tracejado + seta (reconstruído quando o comprimento muda) ————— */
+let axisLine=null, arrowMesh=null;
+function buildAxis(){
+  if(axisLine){ scene.remove(axisLine); axisLine.geometry.dispose(); }
+  if(arrowMesh){ scene.remove(arrowMesh); }
+  const axGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, yBot()-.6, 0), new THREE.Vector3(0, yTop()+.55, 0)
   ]);
-  const axis=new THREE.Line(axGeo, new THREE.LineDashedMaterial({
-    color:MAGENTA, dashSize:.32, gapSize:.24, transparent:true, opacity:.8
+  axisLine = new THREE.Line(axGeo, new THREE.LineDashedMaterial({
+    color:MAGENTA, dashSize:.3, gapSize:.22, transparent:true, opacity:.85
   }));
-  axis.computeLineDistances();
-  scene.add(axis);
-  const arrow=new THREE.Mesh(new THREE.ConeGeometry(.26,.66,16), new THREE.MeshBasicMaterial({color:MAGENTA}));
-  arrow.position.y=TOP_Y+4.7;
-  scene.add(arrow);
+  axisLine.computeLineDistances();
+  scene.add(axisLine);
+  if(!arrowMesh) arrowMesh = new THREE.Mesh(new THREE.ConeGeometry(.22,.55,16), new THREE.MeshBasicMaterial({color:MAGENTA}));
+  arrowMesh.position.y = yTop() + .85;
+  scene.add(arrowMesh);
 }
+buildAxis();
 
-/* ————— câmera: frontal → lateral ————— */
-let phi=.06, theta=Math.PI*.25, dist=29;
+/* ————— câmera ————— */
+let phi=.06, theta=Math.PI*.25, dist=27;
 let tPhi=phi, tTheta=theta, tDist=dist;
-const lookFront=new THREE.Vector3(0,TOP_Y,0);
-const lookSide =new THREE.Vector3(0,.2,0);
-const lookCur=lookFront.clone(); let lookMix=0, tLookMix=0;
-const PHI_SIDE=1.34, DIST_SIDE=27;
+const look=new THREE.Vector3(0,.4,0);
+const PHI_SIDE=1.34, DIST_SIDE=24;
 let mode='intro', clockT=0, introT=0;
 
-function startIntro(){ mode='intro'; introT=0; phi=tPhi=.06; theta=tTheta=Math.PI*.25; dist=tDist=29; lookMix=tLookMix=0; }
-if(reduced){ mode='auto'; phi=tPhi=PHI_SIDE; dist=tDist=DIST_SIDE; lookMix=tLookMix=1; }
+function startIntro(){ mode='intro'; introT=0; phi=tPhi=.06; theta=tTheta=Math.PI*.25; dist=tDist=27; }
+if(reduced){ mode='auto'; phi=tPhi=PHI_SIDE; dist=tDist=DIST_SIDE; }
 else startIntro();
 
 const ease=x=>x<0?0:x>1?1:x*x*x*(x*(x*6-15)+10);
@@ -292,11 +277,11 @@ addEventListener('pointermove', e=>{
   px=e.clientX; py=e.clientY;
 });
 addEventListener('pointerup', ()=>{drag=false;stage.classList.remove('dragging');});
-stage.addEventListener('wheel', e=>{e.preventDefault(); mode='free'; tDist=Math.max(13,Math.min(52,tDist+e.deltaY*.02));},{passive:false});
+stage.addEventListener('wheel', e=>{e.preventDefault(); mode='free'; tDist=Math.max(12,Math.min(50,tDist+e.deltaY*.02));},{passive:false});
 
 const btn=id=>document.getElementById(id);
-btn('btnFront').onclick=()=>{ mode='free'; tPhi=.06; tDist=29; tLookMix=0; };
-btn('btnSide').onclick =()=>{ mode='free'; tPhi=PHI_SIDE; tDist=DIST_SIDE; tLookMix=1; };
+btn('btnFront').onclick=()=>{ mode='free'; tPhi=.06; tDist=27; };
+btn('btnSide').onclick =()=>{ mode='free'; tPhi=PHI_SIDE; tDist=DIST_SIDE; };
 btn('btnReplay').onclick=()=>startIntro();
 
 let tagsOn=false;
@@ -307,91 +292,95 @@ btn('btnTags').onclick=e=>{
   e.currentTarget.classList.toggle('active', tagsOn);
 };
 
+/* ————— painel de sliders ————— */
+const panel = document.getElementById('panel');
+btn('btnPanel').onclick=e=>{
+  panel.classList.toggle('open');
+  e.currentTarget.classList.toggle('active', panel.classList.contains('open'));
+};
+function bindSlider(id, valId, fmt, apply){
+  const el=document.getElementById(id), val=document.getElementById(valId);
+  el.addEventListener('input', ()=>{
+    const v=parseFloat(el.value);
+    val.textContent=fmt(v);
+    apply(v);
+  });
+  return el;
+}
+const sTurns = bindSlider('sTurns','vTurns', v=>v.toFixed(1), v=>{ P.turns=v; });
+const sThick = bindSlider('sThick','vThick', v=>v.toFixed(2), v=>{ P.rHead=v; });
+const sOpac  = bindSlider('sOpac','vOpac', v=>Math.round(v*100)+'%', v=>{ P.tailOpacity=v; });
+const sLen   = bindSlider('sLen','vLen', v=>Math.round(v*100)+'%', v=>{ P.lengthK=v; buildAxis(); });
+document.getElementById('panelReset').onclick=()=>{
+  Object.assign(P, DEFAULTS);
+  sTurns.value=DEFAULTS.turns;       document.getElementById('vTurns').textContent=DEFAULTS.turns.toFixed(1);
+  sThick.value=DEFAULTS.rHead;       document.getElementById('vThick').textContent=DEFAULTS.rHead.toFixed(2);
+  sOpac.value=DEFAULTS.tailOpacity;  document.getElementById('vOpac').textContent=Math.round(DEFAULTS.tailOpacity*100)+'%';
+  sLen.value=DEFAULTS.lengthK;       document.getElementById('vLen').textContent='100%';
+  buildAxis();
+};
+
 const v3=new THREE.Vector3();
-function placeTag(el, obj, yOff=0){
+function placeTag(el, obj, yOff=0, forceHide=false){
   obj.getWorldPosition(v3); v3.y+=yOff;
   v3.project(camera);
   el.style.left=((v3.x*.5+.5)*innerWidth)+'px';
   el.style.top =((-v3.y*.5+.5)*innerHeight)+'px';
-  el.style.opacity=(tagsOn && v3.z<1)?'1':'0';
+  el.style.opacity=(tagsOn && v3.z<1 && !forceHide)?'1':'0';
 }
 
 /* ————— loop ————— */
-const FLOW=reduced?0:.42;
-const SPIN=reduced?0:.05;
-let last=performance.now(), travel=0;
+const CLIMB_TIME = 18;
+const SPIN = reduced ? 0 : .05;
+const FADE = .07;
+let last=performance.now(), climb=0;
 
 function frame(now){
-  const dt=Math.min(.05,(now-last)/1000); last=now; clockT+=dt; travel+=FLOW*dt;
+  const dt=Math.min(.05,(now-last)/1000); last=now; clockT+=dt;
+  if(!reduced) climb += dt/CLIMB_TIME;
+  if(climb>=1) climb-=1;
 
   knotGroup.rotation.y+=SPIN*dt;
-  const breathe=1+(reduced?0:.025*Math.sin(clockT*.65));
-  knotGroup.scale.set(breathe,1,breathe);
+
+  const t = reduced ? .72 : climb;
+  let fade = 1;
+  if(t < FADE)        fade = t/FADE;
+  else if(t > 1-FADE) fade = (1-t)/FADE;
 
   for(const c of comets){
-    const u=travel+c.phase;
-    updateTail(c.tail, u);
-    pointAt(u, 0, _p);
+    updateTail(c.tail, c.rot, t);
+    c.tail.mesh.material.opacity = P.tailOpacity * fade;
+    trefoilAscent(c.rot, t, _p);
     c.head.position.copy(_p);
-    c.glow.position.copy(_p);
-  }
-
-  /* — campo gerador de ondas (contido no miolo) — */
-  const beat = (clockT % WAVE_CYCLE) / WAVE_CYCLE;
-  emitterGlow.scale.setScalar(2.2 + .8*Math.exp(-beat*4));         // pulsa a cada emissão
-  emitterPoint.material.opacity = .5 + .4*Math.exp(-beat*4);
-
-  for(const w of waves){
-    const k = ((clockT/WAVE_CYCLE) + w.offset) % 1;                 // 0 → 1
-    const r = .3 + Math.pow(k,.85)*WAVE_MAX_R;
-    w.mesh.scale.setScalar(r);
-    w.mesh.material.opacity = (reduced? .2 : .38) * Math.pow(1-k, 1.4);
-  }
-
-  // pulsos de energia: do campo central até cada pilar (e o pilar acende ao receber)
-  for(const c of comets) c.targetBoost = 0;
-  for(const pu of pulses){
-    pu.t += dt*pu.speed;
-    if(pu.t>=1) pu.t-=1;
-    const c = comets[pu.comet];
-    c.head.getWorldPosition(_target);
-    const e = easeIO(pu.t);
-    pu.sprite.position.lerpVectors(_origin, _target, e);
-    pu.sprite.material.opacity = Math.sin(pu.t*Math.PI)*.95;
-    pu.sprite.scale.setScalar(.45 + .45*Math.sin(pu.t*Math.PI));
-    if(pu.t>.9) c.targetBoost = Math.max(c.targetBoost||0, (pu.t-.9)/.1);
-  }
-  for(const c of comets){
-    const boost = c.targetBoost||0;
-    c.glow.scale.setScalar(c.baseGlow + boost*1.2);                 // pilar "se alimenta"
-    c.head.material.emissiveIntensity = .45 + boost*.5;
+    c.head.material.opacity = fade;
+    const s = .6 + .4*fade;
+    c.head.scale.set(s,s,s);
   }
 
   if(mode==='intro'){
     introT+=dt;
     const k=ease((introT-1.6)/7.2);
     tPhi=.06+(PHI_SIDE-.06)*k;
-    tDist=29+(DIST_SIDE-29)*k;
+    tDist=27+(DIST_SIDE-27)*k;
     tTheta+=dt*.10;
-    tLookMix=k;
     if(introT>9.4) mode='auto';
   } else if(mode==='auto'){
     tTheta+=dt*.085;
   }
 
   const sm=1-Math.pow(.0015,dt);
-  phi+=(tPhi-phi)*sm; theta+=(tTheta-theta)*sm; dist+=(tDist-dist)*sm; lookMix+=(tLookMix-lookMix)*sm;
+  phi+=(tPhi-phi)*sm; theta+=(tTheta-theta)*sm; dist+=(tDist-dist)*sm;
 
-  lookCur.lerpVectors(lookFront, lookSide, lookMix);
   camera.position.set(
-    lookCur.x+dist*Math.sin(phi)*Math.sin(theta),
-    lookCur.y+dist*Math.cos(phi),
-    lookCur.z+dist*Math.sin(phi)*Math.cos(theta)
+    look.x+dist*Math.sin(phi)*Math.sin(theta),
+    look.y+dist*Math.cos(phi),
+    look.z+dist*Math.sin(phi)*Math.cos(theta)
   );
-  camera.lookAt(lookCur);
+  camera.lookAt(look);
 
-  comets.forEach((c,i)=>placeTag(tagEls[i], c.head, .75));
-  placeTag(tagCore, coreAnchor, 1.15);
+  const hideTags = fade < .5;
+  comets.forEach((c,i)=>placeTag(tagEls[i], c.head, .7, hideTags));
+  placeTag(tagCore, coreAnchor, .9);
 
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
