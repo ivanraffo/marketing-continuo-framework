@@ -1273,11 +1273,11 @@ addEventListener('keydown', e => { if (e.key==='h'||e.key==='H') toggleUI(); if 
 
 /* ---- tamanho ---- */
 function resize(){ const w = stage.clientWidth, h = stage.clientHeight;
-  stage.style.setProperty('--lfs', (h*0.0205).toFixed(2)+'px');
+  stage.style.setProperty('--lfs', (h*0.0205*0.7).toFixed(2)+'px');   // rótulos −30%
   stage.style.setProperty('--tfs', (h*0.036).toFixed(2)+'px');
   // largura do trifólio na vista frontal (curva + espessura do tubo) → logo com 50% dela
   const pxPerWorld = h / (2*Math.tan(THREE.MathUtils.degToRad(21)) * (VIEWS.front.dist - (Y1 - VIEWS.front.look.y)));
-  stage.style.setProperty('--lgw', (0.5 * TRI_W * pxPerWorld).toFixed(1)+'px');
+  stage.style.setProperty('--lgw', (0.25 * TRI_W * pxPerWorld).toFixed(1)+'px');   // logo −50% (25% da largura do trifólio)
   renderer.setSize(w, h, false); composer.setSize(w, h); camera.aspect = w/h; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 
