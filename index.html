@@ -1104,6 +1104,17 @@ function sAtU(u){ u = ((u % (Math.PI*2)) + Math.PI*2) % (Math.PI*2); const i = M
   const f = (u - arcU[i]) / (arcU[i+1]-arcU[i]); return arcS[i] + f*(arcS[i+1]-arcS[i]); }
 const pos = (s, out) => flat(uAtS(s), out);
 const TAIL_L = 0.285 * LTOT;
+/* comprimento de arco da espiral (subida) — velocidade constante também na subida */
+const NSP = 8000, spT = new Float64Array(NSP+1), spS = new Float64Array(NSP+1);
+{ const a = new THREE.Vector3(), b = new THREE.Vector3(); spiral(PILLARS[0], 0, a);
+  for (let i=1;i<=NSP;i++){ const t=i/NSP; spiral(PILLARS[0], t, b); spT[i]=t; spS[i]=spS[i-1]+a.distanceTo(b); a.copy(b); } }
+const L_SP = spS[NSP];
+function tAtSp(s){ s = Math.min(L_SP, Math.max(0, s)); let lo=0, hi=NSP;
+  while (hi-lo>1){ const m=(lo+hi)>>1; if (spS[m] <= s) lo=m; else hi=m; }
+  const f=(s-spS[lo])/(spS[hi]-spS[lo]||1); return spT[lo]+f*(spT[hi]-spT[lo]); }
+const coneSz = t => 0.3 + 0.7 * (GROW0 + (1-GROW0)*lift(t));
+const FLAT_PATH = { pos:(s,o)=>pos(s,o), sz:()=>1, sMin:-1e12 };
+const climbPath = p => ({ pos:(s,o)=>spiral(p, tAtSp(s), o), sz:s=>coneSz(tAtSp(s)), sMin:0 });
 let TRI_W; { let mn=1e9, mx=-1e9; const v=new THREE.Vector3(); for (let i=0;i<2000;i++){ flat(i/2000*Math.PI*2, v); mn=Math.min(mn,v.x); mx=Math.max(mx,v.x); } TRI_W = (mx-mn) + 1.6; }           // cauda: ~90% da distância até o pilar seguinte
 
 /* ---- render ---- */
@@ -1127,13 +1138,14 @@ scene.background = makeBackground();
 
 /* ---- trilho em espiral (linhas finas) ---- */
 const lineVS = `
-  attribute float aT; uniform float uNear, uSpan, uDepthK; varying float vA;
+  attribute float aT; uniform float uNear, uSpan, uDepthK, uHead; varying float vA;
   void main(){
     vec4 mv = modelViewMatrix * vec4(position,1.0);
-    float turns = (1.0 - aT) * ${TURNS.toFixed(2)};
+    float vis = step(aT, uHead + 0.0005);            // trilho revelado até a posição dos pilares
+    float turns = max(0.0, uHead - aT) * ${TURNS.toFixed(2)};
     float a = 0.30 + 0.70 * exp(-turns * 0.85);
     float df = mix(1.0, 0.05, uDepthK * smoothstep(uNear, uNear + 9.0, -mv.z));
-    vA = a * df; gl_Position = projectionMatrix * mv; }`;
+    vA = vis * a * df; gl_Position = projectionMatrix * mv; }`;
 const lineFS = `uniform vec3 uColor; uniform float uGain; varying float vA;
   void main(){ gl_FragColor = vec4(uColor * vA * uGain, 1.0); }`;
 const spiralLines = PILLARS.map(p => {
@@ -1141,7 +1153,7 @@ const spiralLines = PILLARS.map(p => {
   for (let i=0;i<N;i++){ const t=i/(N-1); spiral(p,t,v); P.set([v.x,v.y,v.z], i*3); T[i]=t; }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(P,3)); g.setAttribute('aT', new THREE.BufferAttribute(T,1));
   const m = new THREE.ShaderMaterial({ vertexShader:lineVS, fragmentShader:lineFS,
-    uniforms:{ uColor:{value:new THREE.Color(p.color)}, uGain:{value:p.key==='white'?0.62:0.95}, uNear:{value:20}, uDepthK:{value:1} },
+    uniforms:{ uColor:{value:new THREE.Color(p.color)}, uGain:{value:p.key==='white'?0.62:0.95}, uNear:{value:20}, uDepthK:{value:1}, uHead:{value:1} },
     transparent:true, depthWrite:false, depthTest:false, blending:THREE.AdditiveBlending });
   const l = new THREE.Line(g, m); l.frustumCulled = false; l.renderOrder = 0; scene.add(l); return l;
 });
@@ -1181,17 +1193,20 @@ const items = PILLARS.map(p => {
   sp.renderOrder = 3;
   const back = tube(), front = tube(); back.renderOrder = 2; front.renderOrder = 2.5;
   scene.add(back, front, sp);
-  return { p, sp, back, front, col:new THREE.Color(p.tail), s0:sAtU(p.uEnd), k:1, target:1 };
+  return { p, sp, back, front, col:new THREE.Color(p.tail), s0:sAtU(p.uEnd), k:1, target:1, climb:climbPath(p) };
 });
 const _c=new THREE.Vector3(), _a=new THREE.Vector3(), _b=new THREE.Vector3(), _T=new THREE.Vector3(), _N=new THREE.Vector3(0,1,0), _B=new THREE.Vector3();
-function fillTube(it, mesh, sHead, f0, f1, sizeK, tailK, alphaK){
+const _up = new THREE.Vector3(0,1,0);
+function fillTube(it, mesh, sHead, f0, f1, sizeK, tailK, alphaK, path){
   const P = mesh.geometry.attributes.position.array, C = mesh.geometry.attributes.color.array;
   const R0 = HEAD_D * 0.5 * sizeK, L = TAIL_L * tailK;
   for (let j=0;j<MH;j++){
-    const f = f0 + (f1-f0)*j/(MH-1), s = sHead - f*L;
-    pos(s,_c); pos(s-0.02,_a); pos(s+0.02,_b); _T.subVectors(_b,_a).normalize();
-    _B.crossVectors(_T,_N).normalize();                 // trilho plano: referencial estável
-    const w = R0 * Math.pow(1-f, 0.85) + 0.004;
+    const f = f0 + (f1-f0)*j/(MH-1), s = Math.max(path.sMin, sHead - f*L);
+    path.pos(s,_c); path.pos(Math.max(path.sMin, s-0.02),_a); path.pos(s+0.02,_b); _T.subVectors(_b,_a);
+    if (_T.lengthSq() < 1e-10) _T.set(1,0,0); _T.normalize();
+    _N.copy(_up).addScaledVector(_T, -_up.dot(_T)).normalize();   // referencial estável (vertical projetada)
+    _B.crossVectors(_T,_N).normalize();
+    const w = R0 * path.sz(s) * Math.pow(1-f, 0.85) + 0.004;
     const I = Math.min(1, Math.pow(1-f, 1.15) * 0.97) * alphaK;
     for (let r=0;r<RS;r++){
       const ang=r/RS*Math.PI*2, cx=Math.cos(ang)*w, sy=Math.sin(ang)*w, k=(j*RS+r)*3, q=(j*RS+r)*4;
@@ -1227,7 +1242,8 @@ const cv = renderer.domElement;
 cv.addEventListener('pointerdown', e=>{ drag=true; px=e.clientX; py=e.clientY; cv.classList.add('drag'); cv.setPointerCapture(e.pointerId); });
 cv.addEventListener('pointermove', e=>{ if(!drag) return;
   camTarget.az -= (e.clientX-px)*0.006; camTarget.th = Math.min(1.55, Math.max(0.0008, camTarget.th - (e.clientY-py)*0.005));
-  px=e.clientX; py=e.clientY; setViewButtons(null); });
+  px=e.clientX; py=e.clientY; setViewButtons(null);
+  modeTarget = camTarget.th > 0.9 ? 'climb' : 'flat'; });
 cv.addEventListener('pointerup', ()=>{ drag=false; cv.classList.remove('drag'); });
 
 /* ---- rótulos (âncoras no espaço, posição do framework) ---- */
@@ -1253,6 +1269,7 @@ const $ = s => document.querySelector(s);
 function setViewButtons(v){ $('#vFront').classList.toggle('on', v==='front'); $('#vSide').classList.toggle('on', v==='side'); }
 function goView(v){ const V = VIEWS[v]; camTarget = { th:V.th, az:0, dist:V.dist, look:V.look.clone() };
   cam.az = ((cam.az + Math.PI) % (Math.PI*2) + Math.PI*2) % (Math.PI*2) - Math.PI;   // volta pelo caminho mais curto
+  modeTarget = v === 'side' ? 'climb' : 'flat';
   setViewButtons(v); }
 $('#vFront').onclick = () => goView('front');
 $('#vSide').onclick  = () => goView('side');
@@ -1283,6 +1300,8 @@ addEventListener('resize', resize); resize();
 
 /* ---- loop ---- */
 let T = 0, last = performance.now();
+const V_ARC = LTOT / LOOP_S, HOLD_S = 4;           // mesma velocidade na subida e no patamar
+let modeTarget = 'flat', mode = 'flat', cstage = 'hold', P = 0, phase = 0, holdT = 0, reveal = 1, gfade = 1, gTarget = 1;
 const _cd = new THREE.Vector3(), _top = new THREE.Vector3(0, Y1, 0);
 function frame(now){
   const rdt = Math.min(0.25, (now-last)/1000), dt = Math.min(0.05, rdt); last = now;
@@ -1297,21 +1316,35 @@ function frame(now){
   spiralK += (spiralOn - spiralK) * (1 - Math.pow(0.03, rdt));
   for (const l of spiralLines){ l.visible = spiralK > 0.01; l.material.uniforms.uGain.value = (l===spiralLines[2]?0.62:0.95)*spiralK;
     l.material.uniforms.uNear.value = camera.position.distanceTo(_top) - 0.5; l.material.uniforms.uDepthK.value = frontal; }
-  // pilares
-  const sBase = (T / LOOP_S) * LTOT;
+  // ---- movimento: frontal = giro no patamar | lateral = sobe formando a espiral ----
+  const mdt = paused ? 0 : dt;
+  if (mode !== modeTarget){
+    if (mode === 'climb' && cstage === 'hold' && modeTarget === 'flat'){ mode = 'flat'; }      // já estão no topo: sem corte
+    else { gTarget = 0; if (gfade <= 0.001){ mode = modeTarget; if (mode === 'climb'){ P = 0; cstage = 'climb'; holdT = 0; reveal = 0; } gTarget = 1; } }
+  }
+  if (mode === 'flat'){ phase += V_ARC*mdt; reveal += (1 - reveal)*(1 - Math.pow(0.1, rdt)); }
+  else if (cstage === 'climb'){ P += V_ARC*mdt; reveal = tAtSp(P); if (P >= L_SP){ P = L_SP; cstage = 'hold'; phase = 0; holdT = 0; } }
+  else { phase += V_ARC*mdt; holdT += mdt; reveal = 1;
+    if (holdT > HOLD_S){ gTarget = 0; if (gfade <= 0.001){ P = 0; cstage = 'climb'; reveal = 0; gTarget = 1; } } }
+  gfade += Math.sign(gTarget - gfade) * Math.min(Math.abs(gTarget - gfade), rdt/0.45);
+  for (const l of spiralLines) l.material.uniforms.uHead.value = reveal;
+  const climbing = mode === 'climb' && cstage === 'climb';
+  const gIn = gTarget === 1 ? easeOutBack(Math.min(1, gfade*1.25)) : sm(gfade);
   for (const it of items){
     const step = rdt / 1.2; it.k += Math.sign(it.target - it.k) * Math.min(Math.abs(it.target - it.k), step);
     const k = it.k, on = k > 0.001;
     it.sp.visible = it.back.visible = it.front.visible = on;
     if (!on) continue;
     const entering = it.target === 1;
-    const sizeK = entering ? easeOutBack(Math.min(1, k*1.25)) : sm(k);
-    const tailK = Math.max(0.002, sm(k)), alphaK = Math.min(1, k*3);
-    const sHead = it.s0 + sBase;
-    pos(sHead, it.sp.position);
-    it.sp.scale.setScalar(Math.max(0.0001, sizeK) * HEAD_D / 0.80); it.sp.material.opacity = alphaK;
-    fillTube(it, it.front, sHead, 0, SPLIT, sizeK, tailK, alphaK);
-    fillTube(it, it.back,  sHead, SPLIT, 1, sizeK, tailK, alphaK);
+    const sizeK = (entering ? easeOutBack(Math.min(1, k*1.25)) : sm(k)) * gIn;
+    const tailK = Math.max(0.002, sm(k) * sm(gfade)), alphaK = Math.min(1, k*3) * Math.min(1, gfade*3);
+    const path = climbing ? it.climb : FLAT_PATH;
+    const sHead = climbing ? P : it.s0 + phase;
+    path.pos(sHead, it.sp.position);
+    it.sp.visible = it.sp.visible && gfade > 0.001;
+    it.sp.scale.setScalar(Math.max(0.0001, sizeK * path.sz(sHead)) * HEAD_D / 0.80); it.sp.material.opacity = alphaK;
+    fillTube(it, it.front, sHead, 0, SPLIT, sizeK, tailK, alphaK, path);
+    fillTube(it, it.back,  sHead, SPLIT, 1, sizeK, tailK, alphaK, path);
   }
   placeLabels(frontal);
   composer.render();
@@ -1320,7 +1353,8 @@ function frame(now){
 requestAnimationFrame(frame);
 
 /* para exportar quadros: window.renderAt(t) */
-window.renderAt = t => { T = t; last = performance.now(); };
+window.__state = o => { if (o){ if ('P' in o) P = o.P; if ('holdT' in o) holdT = o.holdT; } return { mode, cstage, P, L_SP, reveal, gfade }; };
+window.renderAt = t => { T = t; phase = t * V_ARC; last = performance.now(); };
 })();
 </script>
 </body>
